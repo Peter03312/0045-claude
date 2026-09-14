@@ -157,6 +157,17 @@ test.describe('修补次序台', () => {
       `总长度 2${'0'.repeat(308)}`,
     );
     await expect(page.getByTestId('solution-summary')).not.toContainText('Infinity');
+
+    // 超长精确数值不撑破页面：无横向溢出，完整值仍在 DOM 中
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    // 拓扑图 SVG 标签截断显示，完整长度经 <title> 悬浮提示保留
+    await expect(page.locator('.graph .strip-sub title').first()).toHaveText(
+      `front · 1${'0'.repeat(308)}`,
+    );
   });
 
   test('无解样例展示最早阻断与约束解释，不返回部分方案', async ({ page }) => {

@@ -125,3 +125,13 @@ export function layoutGraph(problem: Problem): GraphLayout {
 export function stripById(problem: Problem, id: string): Strip | undefined {
   return problem.strips.find((s) => s.id === id);
 }
+
+/**
+ * SVG 文本不可折行：超长标签按码点截断并追加省略号，
+ * 完整值通过返回值 full 交给 <title> 悬浮提示，不丢信息。
+ */
+export function fitLabel(text: string, max: number): { shown: string; full: string | null } {
+  const chars = Array.from(text);
+  if (chars.length <= max) return { shown: text, full: null };
+  return { shown: chars.slice(0, max - 1).join('') + '…', full: text };
+}

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { Problem } from '../types';
 import { toStringExact } from '../decimal';
-import { layoutGraph, stripById, type PlaybackFrame } from './playback';
+import { fitLabel, layoutGraph, stripById, type PlaybackFrame } from './playback';
 
 interface Props {
   problem: Problem;
@@ -53,6 +53,8 @@ export function GraphView({ problem, frame }: Props) {
         if (!p) return null;
         const st = stripState(s.id);
         const just = frame.justApplied === s.id;
+        const label = fitLabel(s.id, 12);
+        const sub = fitLabel(`${s.face} · ${toStringExact(s.length)}`, 18);
         return (
           <g key={s.id} className={`strip strip-${st} ${just ? 'strip-just' : ''}`}>
             <rect
@@ -65,10 +67,12 @@ export function GraphView({ problem, frame }: Props) {
               data-state={st}
             />
             <text x={p.x} y={p.y - 2} textAnchor="middle" className="strip-label">
-              {s.id}
+              {label.shown}
+              {label.full !== null && <title>{label.full}</title>}
             </text>
             <text x={p.x} y={p.y + 11} textAnchor="middle" className="strip-sub">
-              {s.face} · {toStringExact(s.length)}
+              {sub.shown}
+              {sub.full !== null && <title>{sub.full}</title>}
             </text>
           </g>
         );
@@ -79,6 +83,7 @@ export function GraphView({ problem, frame }: Props) {
         const p = layout.fragments[f];
         if (!p) return null;
         const anchored = frame.anchored.has(f);
+        const label = fitLabel(f, 6);
         return (
           <g key={f} className={`fragment ${anchored ? 'fragment-anchored' : ''}`}>
             <circle
@@ -89,7 +94,8 @@ export function GraphView({ problem, frame }: Props) {
               data-anchored={anchored}
             />
             <text x={p.x} y={p.y + 5} textAnchor="middle" className="fragment-label">
-              {f}
+              {label.shown}
+              {label.full !== null && <title>{label.full}</title>}
             </text>
           </g>
         );

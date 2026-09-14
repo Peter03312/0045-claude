@@ -40,7 +40,7 @@ header h1 {
 
 main {
   display: grid;
-  grid-template-columns: minmax(380px, 5fr) 7fr;
+  grid-template-columns: minmax(380px, 5fr) minmax(0, 7fr);
   gap: 16px;
   align-items: start;
 }
@@ -56,6 +56,14 @@ section {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 14px;
+  min-width: 0;
+}
+
+/* 超长精确数值（如 2 后跟 308 个零）在结果区内任意处折行，
+   DOM 中保留完整字符串，不把页面横向撑宽 */
+.output,
+.errors {
+  overflow-wrap: anywhere;
 }
 
 .editor-toolbar {

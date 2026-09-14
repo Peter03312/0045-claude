@@ -1,3 +1,4 @@
+import { ZERO, add, compare as compareDecimals, fromNumber, toNumber, type Decimal } from './decimal';
 import type { DeadEnd, Problem, SolveResult, SolutionStep, Strip, Violation } from './types';
 
 /** 按 Unicode 码点（而非 UTF-16 码元）比较两个字符串 */
@@ -28,7 +29,8 @@ export interface SearchState {
   closedChannels: ReadonlySet<string>;
   applied: readonly string[];
   appliedSet: ReadonlySet<string>;
-  totalLength: number;
+  /** 精确十进制累计长度，避免浮点误差扭曲并列最优比较 */
+  totalLength: Decimal;
 }
 
 export function initialState(problem: Problem): SearchState {
@@ -37,7 +39,7 @@ export function initialState(problem: Problem): SearchState {
     closedChannels: new Set(),
     applied: [],
     appliedSet: new Set(),
-    totalLength: 0,
+    totalLength: ZERO,
   };
 }
 
@@ -82,35 +84,39 @@ export function applyStrip(state: SearchState, strip: Strip): SearchState {
     closedChannels,
     applied: [...state.applied, strip.id],
     appliedSet,
-    totalLength: state.totalLength + strip.length,
+    totalLength: add(state.totalLength, fromNumber(strip.length)),
   };
 }
 
+/**
+ * 已贴集合的记忆化键。编号是任意非空字符串（可含分隔符、引号等），
+ * 简单拼接会发生集合碰撞（如 {"a","x b"} 与 {"a x","b"}），
+ * 导致剪枝吞掉唯一可行分支、误报无解；JSON 编码对字符串数组是单射，无碰撞。
+ */
 function setKey(ids: ReadonlySet<string>): string {
-  return [...ids].sort(compareByCodePoints).join('\u0001');
+  return JSON.stringify([...ids].sort(compareByCodePoints));
 }
 
 /**
  * 穷尽搜索最优施工序列。
- * 目标：锚定全部碎片；依次最小化 条带数 → 总长度 → 编号序列的 Unicode 码点字典序。
+ * 目标：锚定全部碎片；依次最小化 条带数 → 总长度（精确十进制）→ 编号序列的 Unicode 码点字典序。
  * 不逐条贪心、不硬编码：DFS 全枚举 + 分支限界 + 状态记忆化。
  *
  * 正确性要点：
  * - 条带数与总长度只取决于已贴“集合”，因此限界条件对同集合的任意序列一致；
  * - 记忆化记录“子树内不存在严格优于当前 best 的解”的集合——best 只会变得更优，
  *   故该结论对未来所有 best 依然成立；
- * - 无解时 best 始终为空、限界不生效，所有失败分支被完整枚举。
+ * - 无解时进入第二阶段：不做状态记忆化，逐条枚举每条失败分支，
+ *   到达同一死状态的不同施工顺序都作为独立分支报告。
  */
 export function solve(problem: Problem): SolveResult {
   const totalFragments = problem.fragments.length;
   const byId = new Map(problem.strips.map((s) => [s.id, s]));
 
-  let best: { sequence: string[]; totalLength: number } | null = null;
+  let best: { sequence: string[]; totalLength: Decimal } | null = null;
 
   // 子树内不存在优于（访问时刻）best 的解的已贴集合
   const useless = new Set<string>();
-  // 无解时收集：已贴集合 key -> 到达它的码点字典序最小序列及其状态
-  const deadEnds = new Map<string, { sequence: string[]; state: SearchState }>();
 
   /** 当前部分序列是否已在码点字典序上严格大于 best 的同长前缀（若是则任何补全都更差） */
   function prefixDominated(seq: readonly string[]): boolean {
@@ -129,8 +135,8 @@ export function solve(problem: Problem): SolveResult {
         !best ||
         state.applied.length < best.sequence.length ||
         (state.applied.length === best.sequence.length &&
-          (state.totalLength < best.totalLength ||
-            (state.totalLength === best.totalLength &&
+          (compareDecimals(state.totalLength, best.totalLength) < 0 ||
+            (compareDecimals(state.totalLength, best.totalLength) === 0 &&
               compareSequences(state.applied, best.sequence) < 0)))
       ) {
         best = { sequence: [...state.applied], totalLength: state.totalLength };
@@ -139,21 +145,11 @@ export function solve(problem: Problem): SolveResult {
     }
 
     const key = setKey(state.appliedSet);
-
-    // 已知死状态：若是无解搜索中的死端，保留到达它的码点最小序列
-    const recorded = deadEnds.get(key);
-    if (recorded) {
-      if (compareSequences(state.applied, recorded.sequence) < 0) {
-        deadEnds.set(key, { sequence: [...state.applied], state });
-      }
-      return;
-    }
     if (useless.has(key)) return;
 
     const candidates = applicableStrips(problem, state);
     if (candidates.length === 0) {
       useless.add(key);
-      deadEnds.set(key, { sequence: [...state.applied], state });
       return;
     }
 
@@ -163,14 +159,16 @@ export function solve(problem: Problem): SolveResult {
 
     for (const strip of ordered) {
       const nextCount = state.applied.length + 1;
-      const nextLength = state.totalLength + strip.length;
+      const nextLength = add(state.totalLength, fromNumber(strip.length));
       if (best) {
         const b = best;
         if (nextCount > b.sequence.length) continue;
-        if (nextCount === b.sequence.length && nextLength > b.totalLength) continue;
+        if (nextCount === b.sequence.length && compareDecimals(nextLength, b.totalLength) > 0) {
+          continue;
+        }
         if (
           nextCount === b.sequence.length &&
-          nextLength === b.totalLength &&
+          compareDecimals(nextLength, b.totalLength) === 0 &&
           prefixDominated([...state.applied, strip.id])
         ) {
           continue;
@@ -188,7 +186,7 @@ export function solve(problem: Problem): SolveResult {
   dfs(initialState(problem));
 
   if (best) {
-    const b = best as { sequence: string[]; totalLength: number };
+    const b = best as { sequence: string[]; totalLength: Decimal };
     const steps: SolutionStep[] = [];
     let state = initialState(problem);
     for (const id of b.sequence) {
@@ -207,14 +205,31 @@ export function solve(problem: Problem): SolveResult {
       ok: true,
       sequence: b.sequence,
       stripCount: b.sequence.length,
-      totalLength: b.totalLength,
+      totalLength: toNumber(b.totalLength),
       steps,
     };
   }
 
-  // 无解：每条失败分支取首个无可贴条带的状态（按已贴集合去重、序列取码点最小），
-  // 再按（施工步数, 已贴编号序列）升序排列，首项即最早阻断；不返回任何部分方案。
-  const sorted = [...deadEnds.values()]
+  // 无解：第二阶段完整枚举每条失败分支（不做状态记忆化）。
+  // 每条分支取其首个无可贴条带的状态——分支无法越过该状态继续，即其终结状态；
+  // 到达同一状态的不同施工顺序都是独立分支，全部保留，不返回任何部分方案。
+  const deadEnds: { sequence: string[]; state: SearchState }[] = [];
+
+  function dfsAllBranches(state: SearchState): void {
+    if (state.anchored.size === totalFragments) return; // 无解前提下不可达，防御性保留
+    const candidates = applicableStrips(problem, state);
+    if (candidates.length === 0) {
+      deadEnds.push({ sequence: [...state.applied], state });
+      return;
+    }
+    for (const strip of candidates) {
+      dfsAllBranches(applyStrip(state, strip));
+    }
+  }
+
+  dfsAllBranches(initialState(problem));
+
+  const sorted = deadEnds
     .map(({ sequence, state }) => {
       const candidates = problem.strips
         .filter((s) => !state.appliedSet.has(s.id))

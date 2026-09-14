@@ -39,7 +39,8 @@ export default function App() {
 
   const handleFormat = () => {
     try {
-      setText(JSON.stringify(JSON.parse(text), null, 2));
+      // 与任何编辑一致：内容变化必须使旧结果失效
+      handleTextChange(JSON.stringify(JSON.parse(text), null, 2));
     } catch {
       // 无法解析时不改动文本，错误列表已提示
     }

@@ -63,6 +63,21 @@ test.describe('修补次序台', () => {
     await expect(page.getByTestId('no-result')).toBeVisible();
   });
 
+  test('格式化改动内容后旧结果同样失效', async ({ page }) => {
+    await page.goto('/');
+    // 填入合法但紧凑的 JSON，求解后再格式化（内容发生变化）
+    const pretty = await page.getByTestId('editor').inputValue();
+    const compact = JSON.stringify(JSON.parse(pretty));
+    await page.getByTestId('editor').fill(compact);
+    await page.getByTestId('solve-button').click();
+    await expect(page.getByTestId('solution')).toBeVisible();
+
+    await page.getByRole('button', { name: '格式化' }).click();
+    await expect(page.getByTestId('editor')).toHaveValue(pretty);
+    await expect(page.getByTestId('solution')).toHaveCount(0);
+    await expect(page.getByTestId('no-result')).toBeVisible();
+  });
+
   test('结构错误定位对象并清除旧解', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('solve-button').click();

@@ -81,10 +81,11 @@ export function layoutGraph(problem: Problem): GraphLayout {
   });
 
   const strips: GraphLayout['strips'] = {};
-  // 连接相同碎片集合的条带会落在同一质心，按组内序号环绕散开避免重叠
+  // 连接相同碎片集合的条带会落在同一质心，按组内序号环绕散开避免重叠；
+  // 碎片名可含任意字符，分组键用 JSON 编码避免拼接碰撞
   const groups = new Map<string, Strip[]>();
   for (const s of problem.strips) {
-    const key = [...s.fragments].sort().join('\u0001');
+    const key = JSON.stringify([...s.fragments].sort());
     const g = groups.get(key) ?? [];
     g.push(s);
     groups.set(key, g);

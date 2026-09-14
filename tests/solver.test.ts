@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Problem, Strip } from '../src/types';
 import { solve, compareByCodePoints, compareSequences } from '../src/solver';
+import { add, compare as compareDecimals, fromNumber, toNumber, toStringExact } from '../src/decimal';
 import { validateProblem, parseProblem } from '../src/validate';
 import { SAMPLE_REORDER, SAMPLE_UNSOLVABLE } from '../src/sample';
 
@@ -330,5 +331,85 @@ describe('求解器一般性质', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.sequence).toEqual(['first', 'second']);
+  });
+});
+
+describe('回归：含控制字符的合法编号不误报无解', () => {
+  it('状态键编码无碰撞，唯一可行分支不被记忆化吞掉', () => {
+    // 集合 {"a","x\u0001b"} 与 {"a\u0001x","b"} 在朴素拼接键下相同；
+    // 前者是死路（封闭 d-fix 所需通道），后者是唯一通向目标的路径
+    const p: Problem = {
+      fragments: ['A', 'B', 'C', 'D'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 'a', fragments: ['A', 'B'], closesChannels: ['ch2'] }),
+        strip({ id: 'x\u0001b', fragments: ['B', 'C'], closesChannels: ['ch'] }),
+        strip({ id: 'a\u0001x', fragments: ['A', 'B'] }),
+        strip({ id: 'b', fragments: ['B', 'C'] }),
+        strip({ id: 'd-fix', fragments: ['C', 'D'], requiresChannels: ['ch', 'ch2'] }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.sequence).toEqual(['a\u0001x', 'b', 'd-fix']);
+    expect(r.stripCount).toBe(3);
+  });
+});
+
+describe('回归：无解报告保留到达同一状态的全部施工顺序', () => {
+  it('两条顺序不同的分支走到同一死状态，两条都列出', () => {
+    const p: Problem = {
+      fragments: ['A', 'B', 'C'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 's1', fragments: ['A', 'B'], closesChannels: ['ch'] }),
+        strip({ id: 's2', fragments: ['A', 'B'], closesChannels: ['ch'] }),
+        strip({ id: 't', fragments: ['B', 'C'], requiresChannels: ['ch'] }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const sequences = r.deadEnds.map((d) => d.sequence);
+    expect(sequences).toContainEqual(['s1', 's2']);
+    expect(sequences).toContainEqual(['s2', 's1']);
+    expect(r.deadEnds).toHaveLength(2);
+    // 同一状态的两条分支共享同一组候选违反解释
+    expect(r.deadEnds[0].candidates).toEqual(r.deadEnds[1].candidates);
+    const t = r.deadEnds[0].candidates.find((c) => c.stripId === 't');
+    expect(t?.violations).toContainEqual({ kind: 'channel-closed', channel: 'ch' });
+  });
+});
+
+describe('回归：小数长度精确比较', () => {
+  it('0.1+0.2 与 0.3+0 精确相等，并列最优取码点字典序最小者', () => {
+    const p: Problem = {
+      fragments: ['A', 'M', 'T'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 'p1', fragments: ['A', 'M'], length: 0.1, closesChannels: ['ch2'] }),
+        strip({ id: 'p2', fragments: ['M', 'T'], length: 0.2, requiresChannels: ['ch1'] }),
+        strip({ id: 'q1', fragments: ['A', 'M'], length: 0.3, closesChannels: ['ch1'] }),
+        strip({ id: 'q2', fragments: ['M', 'T'], length: 0, requiresChannels: ['ch2'] }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // 浮点下 0.1+0.2 > 0.3 会错选 q 路径；精确十进制下两者相等，p 路径字典序更小
+    expect(r.sequence).toEqual(['p1', 'p2']);
+    expect(r.totalLength).toBe(0.3);
+  });
+
+  it('十进制运算单元行为', () => {
+    const sum = add(fromNumber(0.1), fromNumber(0.2));
+    expect(compareDecimals(sum, fromNumber(0.3))).toBe(0);
+    expect(toNumber(sum)).toBe(0.3);
+    expect(toStringExact(sum)).toBe('0.3');
+    expect(compareDecimals(add(fromNumber(1e-7), fromNumber(1e-7)), fromNumber(2e-7))).toBe(0);
+    expect(compareDecimals(fromNumber(1e21), fromNumber(0.5))).toBeGreaterThan(0);
+    expect(toStringExact(fromNumber(1.5e3))).toBe('1500');
+    expect(toStringExact(add(fromNumber(0), fromNumber(0)))).toBe('0');
   });
 });

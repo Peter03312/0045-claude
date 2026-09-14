@@ -8,6 +8,7 @@ import {
   applyStrip,
   type SearchState,
 } from '../src/solver';
+import { compare as compareDecimals, toNumber, type Decimal } from '../src/decimal';
 
 /** 确定性伪随机数（mulberry32），保证测试可复现 */
 function rng(seed: number): () => number {
@@ -32,14 +33,17 @@ function randomProblem(rand: () => number, index: number): Problem {
     const shuffled = [...fragments].sort(() => rand() - 0.5);
     const take = 1 + Math.floor(rand() * Math.min(fragCount, 2));
     const pick = (arr: string[], p: number) => arr.filter(() => rand() < p);
+    // 混合整数与小数长度，覆盖精确十进制比较（0.1+0.2 与 0.3 之类的并列）
+    const lengthPool = [0, 0.1, 0.2, 0.3, 1, 1.5, 2, 5];
     return {
-      id: `S${index}_${i}`,
+      // 少量编号含控制字符，交叉验证状态键编码无碰撞
+      id: rand() < 0.1 ? `S${i}\u0001${index}` : `S${index}_${i}`,
       fragments: shuffled.slice(0, take),
       face: rand() < 0.5 ? 'front' : 'back',
       requiresChannels: pick(channels, 0.5),
       closesChannels: pick(channels, 0.4),
       prerequisites: [], // 先留空，下面统一生成
-      length: Math.floor(rand() * 6),
+      length: lengthPool[Math.floor(rand() * lengthPool.length)],
       disabled: rand() < 0.15,
     };
   });
@@ -53,8 +57,8 @@ function randomProblem(rand: () => number, index: number): Problem {
 }
 
 /** 朴素全排列枚举：与 solve 完全独立的参照实现 */
-function bruteForce(problem: Problem): { sequence: string[]; totalLength: number } | null {
-  let best: { sequence: string[]; totalLength: number } | null = null;
+function bruteForce(problem: Problem): { sequence: string[]; totalLength: Decimal } | null {
+  let best: { sequence: string[]; totalLength: Decimal } | null = null;
 
   function walk(state: SearchState): void {
     if (state.anchored.size === problem.fragments.length) {
@@ -62,8 +66,8 @@ function bruteForce(problem: Problem): { sequence: string[]; totalLength: number
         !best ||
         state.applied.length < best.sequence.length ||
         (state.applied.length === best.sequence.length &&
-          (state.totalLength < best.totalLength ||
-            (state.totalLength === best.totalLength &&
+          (compareDecimals(state.totalLength, best.totalLength) < 0 ||
+            (compareDecimals(state.totalLength, best.totalLength) === 0 &&
               compareSequences(state.applied, best.sequence) < 0)))
       ) {
         best = { sequence: [...state.applied], totalLength: state.totalLength };
@@ -96,7 +100,7 @@ describe('对照朴素枚举的随机化交叉验证', () => {
         expect(actual.ok, `问题 ${i} 应有解`).toBe(true);
         if (actual.ok) {
           expect(actual.sequence, `问题 ${i} 序列`).toEqual(expected.sequence);
-          expect(actual.totalLength, `问题 ${i} 总长度`).toBe(expected.totalLength);
+          expect(actual.totalLength, `问题 ${i} 总长度`).toBe(toNumber(expected.totalLength));
         }
         solvable++;
       }

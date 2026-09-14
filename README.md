@@ -1,0 +1,113 @@
+# 补强条带施工次序台
+
+纯浏览器（React + TypeScript + Vite）的修补次序工具：纸页裂成相邻碎片后，短补强条可能
+封住背面通道，使后来唯一能固定孤片的条带无法施工。本工具对施工次序做**穷尽搜索**，
+给出可按面次施工的最优补强顺序；无解时解释每个失败分支的最早阻断。
+
+## 问题模型
+
+- **碎片**：唯一非空字符串编号；`initialAnchored` 为初始锚定的碎片子集。
+- **条带**：唯一非空编号，字段包括
+  - `fragments`：所连碎片（非空，引用必须存在）；
+  - `face`：施工面（非空字符串）；
+  - `requiresChannels`：施工时须全部开放的通道；
+  - `closesChannels`：贴后封闭的通道；
+  - `prerequisites`：须先于本条带施工的条带编号（叠压前置）；
+  - `length`：非负有限数值；
+  - `disabled`：布尔禁用状态，禁用条带任何时刻不可施工。
+- **通道**：凡被条带引用的通道即存在，初始全部开放。
+
+### 施工规则
+
+每步只能选择**未禁用、未贴过**的条带，且满足：
+
+1. 至少一个所连碎片已锚定；
+2. 全部所需通道处于开放状态；
+3. 全部叠压前置已施工。
+
+贴后：所连碎片全部标为锚定，指定通道被封闭。
+
+### 优化目标（依次）
+
+1. 锚定**全部**碎片（硬约束）；
+2. 条带数最少；
+3. 总长度最小；
+4. 条带施工编号序列的 **Unicode 码点**字典序最小。
+
+搜索为 DFS 全枚举 + 分支限界 + 状态记忆化，不逐条贪心、不硬编码任何样例。
+
+### 无解报告
+
+穷尽所有分支仍无解时，不返回部分方案。对每条失败分支取**首个无可贴条带的状态**
+（按已贴集合去重，序列取码点最小），按（施工步数, 已贴编号序列）升序列出；
+首项即最早阻断，并逐条解释每个候选条带违反的约束
+（已禁用 / 所连碎片均未锚定 / 所需通道已封闭 / 前置未施工）。
+
+## 输入格式
+
+```json
+{
+  "fragments": ["A", "B", "C"],
+  "initialAnchored": ["A"],
+  "strips": [
+    {
+      "id": "x-short",
+      "fragments": ["A", "B"],
+      "face": "front",
+      "requiresChannels": [],
+      "closesChannels": ["ch-back"],
+      "prerequisites": [],
+      "length": 1,
+      "disabled": false
+    }
+  ]
+}
+```
+
+结构错误（重复/空编号、悬空引用、负长度、非布尔禁用、JSON 语法错误等）会逐条
+定位到出错对象路径（如 `strips[0].fragments[1]`），并清除旧解；任何编辑都会使
+当前结果失效，需重新求解。
+
+## 内置样例
+
+- **换序可完成**：短条 `x-short` 先贴会封闭背面通道 `ch-back`，使唯一能固定孤片 C
+  的 `y-span` 无法施工；最优解改先贴不封通道的 `w-long`，再贴 `y-span`。
+- **无解**：同题但 `w-long` 被禁用，用于演示失败分支的阻断解释。
+
+## 本地开发
+
+```bash
+npm ci
+npm run dev        # 开发服务器
+npm run test:run   # Vitest 单元测试（换序 / 并列解 / 无解 / 校验）
+npm run build      # 类型检查 + 生产构建
+npm run test:e2e   # Playwright 端到端（导入、求解、复演、修改失效；自动构建并起 preview）
+```
+
+首次运行端到端测试前需安装浏览器：`npx playwright install --with-deps chromium`。
+
+## Docker
+
+```bash
+# 启动静态 web（仅此一个常驻服务），默认 http://localhost:8080
+docker compose up --build web
+
+# 覆盖宿主端口
+APP_PORT=3000 docker compose up --build web
+
+# 一次性 verify：单元测试 + 生产构建 + 端到端测试，跑完即退出
+docker compose --profile verify up --build --exit-code-from verify verify
+```
+
+## 目录结构
+
+```
+src/
+  types.ts      领域模型与结果类型
+  validate.ts   JSON 解析与结构校验（错误定位到对象路径）
+  solver.ts     穷尽搜索求解器（分支限界 + 码点字典序）
+  sample.ts     内置样例（换序可完成 / 无解）
+  components/   拓扑图复演、解展示、无解报告
+tests/          Vitest：换序、并列解、无解、校验、求解器性质
+e2e/            Playwright：导入、求解、复演、修改后旧结果失效
+```

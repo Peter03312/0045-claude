@@ -1,0 +1,334 @@
+import { describe, expect, it } from 'vitest';
+import type { Problem, Strip } from '../src/types';
+import { solve, compareByCodePoints, compareSequences } from '../src/solver';
+import { validateProblem, parseProblem } from '../src/validate';
+import { SAMPLE_REORDER, SAMPLE_UNSOLVABLE } from '../src/sample';
+
+function strip(partial: Partial<Strip> & { id: string }): Strip {
+  return {
+    fragments: [],
+    face: 'front',
+    requiresChannels: [],
+    closesChannels: [],
+    prerequisites: [],
+    length: 1,
+    disabled: false,
+    ...partial,
+  };
+}
+
+describe('换序：短条先贴堵死、换序可完成', () => {
+  it('内置样例的最优解避开先贴短条的陷阱', () => {
+    const r = solve(SAMPLE_REORDER);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // 贪心先贴最短的 x-short 会封闭 ch-back 使 y-span 永不可贴；
+    // 唯一可行次序是先 w-long 后 y-span
+    expect(r.sequence).toEqual(['w-long', 'y-span']);
+    expect(r.stripCount).toBe(2);
+    expect(r.totalLength).toBe(8);
+    // 逐步信息：先锚定 B，再锚定 C
+    expect(r.steps[0].newlyAnchored).toEqual(['B']);
+    expect(r.steps[1].newlyAnchored).toEqual(['C']);
+    expect(r.steps[0].face).toBe('front');
+    expect(r.steps[1].face).toBe('back');
+  });
+
+  it('禁用 w-long 后同一问题无解（陷阱成为必然）', () => {
+    const r = solve(SAMPLE_UNSOLVABLE);
+    expect(r.ok).toBe(false);
+  });
+
+  it('分支限界不会漏掉更晚才发现的更少条带解', () => {
+    const p: Problem = {
+      fragments: ['A', 'B', 'C', 'D'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 'a1', fragments: ['A', 'B'], length: 10 }),
+        strip({ id: 'a2', fragments: ['B', 'C'], length: 10 }),
+        strip({ id: 'a3', fragments: ['C', 'D'], length: 10 }),
+        strip({ id: 'b0', fragments: ['A', 'B', 'C'], length: 5 }),
+        strip({ id: 'b1', fragments: ['C', 'D'], length: 5 }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // 按编号序先遇到 3 条带的 a 路径（总长 30），最优是 2 条带的 b 路径
+    expect(r.stripCount).toBe(2);
+    expect(r.sequence).toEqual(['b0', 'b1']);
+    expect(r.totalLength).toBe(10);
+  });
+});
+
+describe('并列解：条带数与总长度相同则取码点字典序最小序列', () => {
+  it('两条等长条带取编号较小者', () => {
+    const p: Problem = {
+      fragments: ['A', 'B'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 'zz', fragments: ['A', 'B'], length: 2 }),
+        strip({ id: 'aa', fragments: ['A', 'B'], length: 2 }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.sequence).toEqual(['aa']);
+  });
+
+  it('多步序列逐元素比较，前位优先', () => {
+    const p: Problem = {
+      fragments: ['A', 'B', 'C'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 'm2', fragments: ['A', 'B'], length: 1 }),
+        strip({ id: 'm1', fragments: ['A', 'B'], length: 1 }),
+        strip({ id: 'z1', fragments: ['B', 'C'], length: 1 }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.sequence).toEqual(['m1', 'z1']);
+    expect(r.totalLength).toBe(2);
+  });
+
+  it('字典序按 Unicode 码点而非 UTF-16 码元', () => {
+    // U+FFF0 的码点小于 U+1F600，但其 UTF-16 码元大于 😀 的前导代理
+    expect(compareByCodePoints('\uFFF0', '\u{1F600}')).toBeLessThan(0);
+    expect('\u{1F600}' < '\uFFF0').toBe(true); // JS 默认按码元比较，结论相反
+    expect(compareSequences(['a', 'b'], ['a', 'b', 'c'])).toBeLessThan(0);
+    expect(compareSequences(['b'], ['a', 'z'])).toBeGreaterThan(0);
+  });
+
+  it('条带数优先于总长度：一条长带胜过两条短带', () => {
+    const p: Problem = {
+      fragments: ['A', 'B', 'C'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 'big', fragments: ['A', 'B', 'C'], length: 100 }),
+        strip({ id: 's1', fragments: ['A', 'B'], length: 1 }),
+        strip({ id: 's2', fragments: ['B', 'C'], length: 1 }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.sequence).toEqual(['big']);
+    expect(r.totalLength).toBe(100);
+  });
+});
+
+describe('无解：失败分支与最早阻断解释', () => {
+  it('内置无解样例：按（步数, 序列）排序并解释各候选违反的约束', () => {
+    const r = solve(SAMPLE_UNSOLVABLE);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    // 不返回部分方案
+    expect('sequence' in r).toBe(false);
+    expect('steps' in r).toBe(false);
+
+    expect(r.deadEnds.length).toBeGreaterThan(0);
+    // 排序：步数升序，同步数按码点字典序
+    for (let i = 1; i < r.deadEnds.length; i++) {
+      const a = r.deadEnds[i - 1];
+      const b = r.deadEnds[i];
+      expect(a.sequence.length).toBeLessThanOrEqual(b.sequence.length);
+      if (a.sequence.length === b.sequence.length) {
+        expect(compareSequences(a.sequence, b.sequence)).toBeLessThan(0);
+      }
+    }
+    // 最早阻断：贴上 x-short 后 ch-back 被封
+    const first = r.deadEnds[0];
+    expect(first.sequence).toEqual(['x-short']);
+    expect(first.closedChannels).toContain('ch-back');
+    expect(first.anchored).toEqual(['A', 'B']);
+    const ySpan = first.candidates.find((c) => c.stripId === 'y-span');
+    expect(ySpan?.violations).toContainEqual({ kind: 'channel-closed', channel: 'ch-back' });
+    const wLong = first.candidates.find((c) => c.stripId === 'w-long');
+    expect(wLong?.violations).toContainEqual({ kind: 'disabled' });
+  });
+
+  it('孤片无任何条带连接：最早阻断发生在第 0 步', () => {
+    const p: Problem = {
+      fragments: ['A', 'B'],
+      initialAnchored: ['A'],
+      // 唯一条带只连未锚定的 B，第 0 步即无可贴条带
+      strips: [strip({ id: 'only', fragments: ['B'] })],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.deadEnds[0].sequence).toEqual([]);
+    const only = r.deadEnds[0].candidates.find((c) => c.stripId === 'only');
+    expect(only?.violations).toContainEqual({ kind: 'no-anchored-fragment' });
+  });
+
+  it('前置环导致无解，并报告缺失的前置', () => {
+    const p: Problem = {
+      fragments: ['A', 'B'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 'p1', fragments: ['A', 'B'], prerequisites: ['p2'] }),
+        strip({ id: 'p2', fragments: ['A', 'B'], prerequisites: ['p1'] }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const first = r.deadEnds[0];
+    expect(first.sequence).toEqual([]);
+    const p1 = first.candidates.find((c) => c.stripId === 'p1');
+    expect(p1?.violations).toContainEqual({ kind: 'prerequisite-missing', prerequisite: 'p2' });
+  });
+
+  it('未锚定碎片约束：无锚定点的条带不可作为首贴', () => {
+    const p: Problem = {
+      fragments: ['A', 'B', 'C'],
+      initialAnchored: ['A'],
+      strips: [strip({ id: 'far', fragments: ['B', 'C'] })],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const far = r.deadEnds[0].candidates.find((c) => c.stripId === 'far');
+    expect(far?.violations).toContainEqual({ kind: 'no-anchored-fragment' });
+  });
+});
+
+describe('结构校验：错误定位到对象', () => {
+  it('合法输入通过', () => {
+    const r = validateProblem(SAMPLE_REORDER);
+    expect('problem' in r).toBe(true);
+  });
+
+  it('重复条带编号定位到 strips[i].id', () => {
+    const r = validateProblem({
+      fragments: ['A'],
+      initialAnchored: [],
+      strips: [
+        { ...strip({ id: 'x', fragments: ['A'] }) },
+        { ...strip({ id: 'x', fragments: ['A'] }) },
+      ],
+    });
+    expect('errors' in r).toBe(true);
+    if (!('errors' in r)) return;
+    expect(r.errors.some((e) => e.path === 'strips[1].id')).toBe(true);
+  });
+
+  it('空编号、未知碎片、负长度、非布尔禁用均被定位', () => {
+    const r = validateProblem({
+      fragments: ['A', ''],
+      initialAnchored: ['ZZ'],
+      strips: [
+        {
+          id: 's',
+          fragments: ['A', 'NOPE'],
+          face: '',
+          requiresChannels: ['c', 'c'],
+          closesChannels: [],
+          prerequisites: ['ghost'],
+          length: -3,
+          disabled: 'yes',
+        },
+      ],
+    });
+    expect('errors' in r).toBe(true);
+    if (!('errors' in r)) return;
+    const paths = r.errors.map((e) => e.path);
+    expect(paths).toContain('fragments[1]');
+    expect(paths).toContain('initialAnchored[0]');
+    expect(paths).toContain('strips[0].fragments[1]');
+    expect(paths).toContain('strips[0].face');
+    expect(paths).toContain('strips[0].requiresChannels[1]');
+    expect(paths).toContain('strips[0].prerequisites[0]');
+    expect(paths).toContain('strips[0].length');
+    expect(paths).toContain('strips[0].disabled');
+  });
+
+  it('条带不能以自身为前置', () => {
+    const r = validateProblem({
+      fragments: ['A'],
+      initialAnchored: ['A'],
+      strips: [{ ...strip({ id: 's', fragments: ['A'] }), prerequisites: ['s'] }],
+    });
+    expect('errors' in r).toBe(true);
+    if (!('errors' in r)) return;
+    expect(r.errors[0].path).toBe('strips[0].prerequisites[0]');
+  });
+
+  it('JSON 解析失败返回 $ 路径错误', () => {
+    const r = parseProblem('{ not json');
+    expect('errors' in r).toBe(true);
+    if (!('errors' in r)) return;
+    expect(r.errors[0].path).toBe('$');
+    expect(r.errors[0].message).toContain('JSON 解析失败');
+  });
+
+  it('根节点必须是对象', () => {
+    const r = parseProblem('[1,2,3]');
+    expect('errors' in r).toBe(true);
+    if (!('errors' in r)) return;
+    expect(r.errors[0].path).toBe('$');
+  });
+});
+
+describe('求解器一般性质', () => {
+  it('全部碎片初始已锚定：零条带即完成', () => {
+    const p: Problem = {
+      fragments: ['A'],
+      initialAnchored: ['A'],
+      strips: [strip({ id: 'unused', fragments: ['A'], length: 5 })],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.sequence).toEqual([]);
+    expect(r.stripCount).toBe(0);
+    expect(r.totalLength).toBe(0);
+  });
+
+  it('零长度条带合法且参与最优', () => {
+    const p: Problem = {
+      fragments: ['A', 'B'],
+      initialAnchored: ['A'],
+      strips: [strip({ id: 'free', fragments: ['A', 'B'], length: 0 })],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.sequence).toEqual(['free']);
+    expect(r.totalLength).toBe(0);
+  });
+
+  it('前置约束被遵守：前置条带先施工', () => {
+    const p: Problem = {
+      fragments: ['A', 'B', 'C'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 'top', fragments: ['B', 'C'], prerequisites: ['base'] }),
+        strip({ id: 'base', fragments: ['A', 'B'] }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.sequence).toEqual(['base', 'top']);
+  });
+
+  it('已贴条带封闭的通道不影响后续无需该通道的条带', () => {
+    const p: Problem = {
+      fragments: ['A', 'B', 'C'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 'first', fragments: ['A', 'B'], closesChannels: ['ch'] }),
+        strip({ id: 'second', fragments: ['B', 'C'] }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.sequence).toEqual(['first', 'second']);
+  });
+});

@@ -1,0 +1,16 @@
+{
+  "fragments": ["P1", "P2"],
+  "initialAnchored": ["P1"],
+  "strips": [
+    {
+      "id": "imported-strip",
+      "fragments": ["P1", "P2"],
+      "face": "front",
+      "requiresChannels": [],
+      "closesChannels": [],
+      "prerequisites": [],
+      "length": 2.5,
+      "disabled": false
+    }
+  ]
+}

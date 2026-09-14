@@ -1,0 +1,18 @@
+services:
+  # 静态 web：nginx 托管生产构建产物，宿主端口由 APP_PORT 覆盖（默认 8080）
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "${APP_PORT:-8080}:80"
+    restart: unless-stopped
+
+  # 一次性校验：跑单元测试、生产构建与端到端测试后退出
+  # 用法：docker compose --profile verify up --exit-code-from verify verify
+  verify:
+    profiles: ["verify"]
+    build:
+      context: .
+      target: verify
+    init: true

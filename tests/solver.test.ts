@@ -1,13 +1,38 @@
 import { describe, expect, it } from 'vitest';
 import type { Problem, Strip } from '../src/types';
 import { solve, compareByCodePoints, compareSequences } from '../src/solver';
-import { add, compare as compareDecimals, fromNumber, toNumber, toStringExact } from '../src/decimal';
+import {
+  add,
+  compare as compareDecimals,
+  fromNumber,
+  fromString,
+  toNumber,
+  toStringExact,
+} from '../src/decimal';
 import { validateProblem, parseProblem } from '../src/validate';
+import { parseJson, stringifyJson } from '../src/json';
 import { SAMPLE_REORDER, SAMPLE_UNSOLVABLE } from '../src/sample';
 
-function strip(partial: Partial<Strip> & { id: string }): Strip {
+function strip(
+  partial: (Omit<Partial<Strip>, 'length'> & { length?: number }) & { id: string },
+): Strip {
+  const { length, ...rest } = partial;
   return {
     fragments: [],
+    face: 'front',
+    requiresChannels: [],
+    closesChannels: [],
+    prerequisites: [],
+    disabled: false,
+    ...rest,
+    length: fromNumber(length ?? 1),
+  };
+}
+
+/** 校验测试用的原始 JSON 条带（length 为普通 JSON 数值） */
+function rawStrip(partial: Record<string, unknown> & { id: string }): Record<string, unknown> {
+  return {
+    fragments: ['A'],
     face: 'front',
     requiresChannels: [],
     closesChannels: [],
@@ -18,16 +43,23 @@ function strip(partial: Partial<Strip> & { id: string }): Strip {
   };
 }
 
+/** 内置样例是原始 JSON，先走统一校验路径得到 Problem */
+function problemOf(sample: unknown): Problem {
+  const r = validateProblem(sample);
+  if ('errors' in r) throw new Error(`内置样例结构非法：${JSON.stringify(r.errors)}`);
+  return r.problem;
+}
+
 describe('换序：短条先贴堵死、换序可完成', () => {
   it('内置样例的最优解避开先贴短条的陷阱', () => {
-    const r = solve(SAMPLE_REORDER);
+    const r = solve(problemOf(SAMPLE_REORDER));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     // 贪心先贴最短的 x-short 会封闭 ch-back 使 y-span 永不可贴；
     // 唯一可行次序是先 w-long 后 y-span
     expect(r.sequence).toEqual(['w-long', 'y-span']);
     expect(r.stripCount).toBe(2);
-    expect(r.totalLength).toBe(8);
+    expect(r.totalLength).toBe('8');
     // 逐步信息：先锚定 B，再锚定 C
     expect(r.steps[0].newlyAnchored).toEqual(['B']);
     expect(r.steps[1].newlyAnchored).toEqual(['C']);
@@ -36,7 +68,7 @@ describe('换序：短条先贴堵死、换序可完成', () => {
   });
 
   it('禁用 w-long 后同一问题无解（陷阱成为必然）', () => {
-    const r = solve(SAMPLE_UNSOLVABLE);
+    const r = solve(problemOf(SAMPLE_UNSOLVABLE));
     expect(r.ok).toBe(false);
   });
 
@@ -58,7 +90,7 @@ describe('换序：短条先贴堵死、换序可完成', () => {
     // 按编号序先遇到 3 条带的 a 路径（总长 30），最优是 2 条带的 b 路径
     expect(r.stripCount).toBe(2);
     expect(r.sequence).toEqual(['b0', 'b1']);
-    expect(r.totalLength).toBe(10);
+    expect(r.totalLength).toBe('10');
   });
 });
 
@@ -92,7 +124,7 @@ describe('并列解：条带数与总长度相同则取码点字典序最小序�
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.sequence).toEqual(['m1', 'z1']);
-    expect(r.totalLength).toBe(2);
+    expect(r.totalLength).toBe('2');
   });
 
   it('字典序按 Unicode 码点而非 UTF-16 码元', () => {
@@ -117,13 +149,13 @@ describe('并列解：条带数与总长度相同则取码点字典序最小序�
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.sequence).toEqual(['big']);
-    expect(r.totalLength).toBe(100);
+    expect(r.totalLength).toBe('100');
   });
 });
 
 describe('无解：失败分支与最早阻断解释', () => {
   it('内置无解样例：按（步数, 序列）排序并解释各候选违反的约束', () => {
-    const r = solve(SAMPLE_UNSOLVABLE);
+    const r = solve(problemOf(SAMPLE_UNSOLVABLE));
     expect(r.ok).toBe(false);
     if (r.ok) return;
     // 不返回部分方案
@@ -208,10 +240,7 @@ describe('结构校验：错误定位到对象', () => {
     const r = validateProblem({
       fragments: ['A'],
       initialAnchored: [],
-      strips: [
-        { ...strip({ id: 'x', fragments: ['A'] }) },
-        { ...strip({ id: 'x', fragments: ['A'] }) },
-      ],
+      strips: [rawStrip({ id: 'x' }), rawStrip({ id: 'x' })],
     });
     expect('errors' in r).toBe(true);
     if (!('errors' in r)) return;
@@ -252,7 +281,7 @@ describe('结构校验：错误定位到对象', () => {
     const r = validateProblem({
       fragments: ['A'],
       initialAnchored: ['A'],
-      strips: [{ ...strip({ id: 's', fragments: ['A'] }), prerequisites: ['s'] }],
+      strips: [{ ...rawStrip({ id: 's' }), prerequisites: ['s'] }],
     });
     expect('errors' in r).toBe(true);
     if (!('errors' in r)) return;
@@ -287,7 +316,7 @@ describe('求解器一般性质', () => {
     if (!r.ok) return;
     expect(r.sequence).toEqual([]);
     expect(r.stripCount).toBe(0);
-    expect(r.totalLength).toBe(0);
+    expect(r.totalLength).toBe('0');
   });
 
   it('零长度条带合法且参与最优', () => {
@@ -300,7 +329,7 @@ describe('求解器一般性质', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.sequence).toEqual(['free']);
-    expect(r.totalLength).toBe(0);
+    expect(r.totalLength).toBe('0');
   });
 
   it('前置约束被遵守：前置条带先施工', () => {
@@ -399,7 +428,7 @@ describe('回归：小数长度精确比较', () => {
     if (!r.ok) return;
     // 浮点下 0.1+0.2 > 0.3 会错选 q 路径；精确十进制下两者相等，p 路径字典序更小
     expect(r.sequence).toEqual(['p1', 'p2']);
-    expect(r.totalLength).toBe(0.3);
+    expect(r.totalLength).toBe('0.3');
   });
 
   it('十进制运算单元行为', () => {
@@ -411,5 +440,106 @@ describe('回归：小数长度精确比较', () => {
     expect(compareDecimals(fromNumber(1e21), fromNumber(0.5))).toBeGreaterThan(0);
     expect(toStringExact(fromNumber(1.5e3))).toBe('1500');
     expect(toStringExact(add(fromNumber(0), fromNumber(0)))).toBe('0');
+  });
+});
+
+describe('回归：非常接近的小数长度不被当成相同', () => {
+  it('JSON 字面量逐位保留，实际更短的条带胜出', () => {
+    // 两个长度相差 1e-17，作为 double 都会舍入到 1；
+    // 若解析阶段丢精度，两者被判等长，字典序更小的 a-long 会被错选
+    const text = `{
+      "fragments": ["A", "B"],
+      "initialAnchored": ["A"],
+      "strips": [
+        { "id": "a-long", "fragments": ["A", "B"], "face": "front",
+          "requiresChannels": [], "closesChannels": [], "prerequisites": [],
+          "length": 1.00000000000000002, "disabled": false },
+        { "id": "b-short", "fragments": ["A", "B"], "face": "front",
+          "requiresChannels": [], "closesChannels": [], "prerequisites": [],
+          "length": 1.00000000000000001, "disabled": false }
+      ]
+    }`;
+    const parsed = parseProblem(text);
+    expect('problem' in parsed).toBe(true);
+    if (!('problem' in parsed)) return;
+    const r = solve(parsed.problem);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.sequence).toEqual(['b-short']);
+    expect(r.totalLength).toBe('1.00000000000000001');
+  });
+
+  it('格式化（解析+序列化往返）不损失字面量精度', () => {
+    const parsed = parseProblem('{"fragments":["A"],"initialAnchored":["A"],"strips":[]}');
+    expect('problem' in parsed).toBe(true);
+    // 直接对 JSON 文本做往返
+    const text = '{ "x": 1.00000000000000001, "y": [0.30000000000000004, 1e-7] }';
+    const roundTripped = stringifyJson(parseJson(text));
+    expect(roundTripped).toContain('1.00000000000000001');
+    expect(roundTripped).toContain('0.30000000000000004');
+    expect(roundTripped).toContain('1e-7');
+  });
+});
+
+describe('回归：总长度超出 double 范围仍为精确值', () => {
+  it('两条 1e308 的总和是精确的 2e308，而非 Infinity', () => {
+    const p: Problem = {
+      fragments: ['A', 'B', 'C'],
+      initialAnchored: ['A'],
+      strips: [
+        strip({ id: 'h1', fragments: ['A', 'B'], length: 1e308 }),
+        strip({ id: 'h2', fragments: ['B', 'C'], length: 1e308 }),
+      ],
+    };
+    const r = solve(p);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.totalLength).toBe('2' + '0'.repeat(308));
+    expect(Number.isFinite(Number(r.totalLength))).toBe(false); // 确实超出 double
+  });
+
+  it('1e999 字面量是合法有限长度（不经过 double 舍入）', () => {
+    const text = `{
+      "fragments": ["A", "B"],
+      "initialAnchored": ["A"],
+      "strips": [
+        { "id": "huge", "fragments": ["A", "B"], "face": "front",
+          "requiresChannels": [], "closesChannels": [], "prerequisites": [],
+          "length": 1e999, "disabled": false }
+      ]
+    }`;
+    const parsed = parseProblem(text);
+    expect('problem' in parsed).toBe(true);
+    if (!('problem' in parsed)) return;
+    const r = solve(parsed.problem);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.totalLength).toBe('1' + '0'.repeat(999));
+  });
+
+  it('指数超出可处理范围按结构错误定位，而非静默舍入', () => {
+    const text = `{
+      "fragments": ["A"],
+      "initialAnchored": ["A"],
+      "strips": [
+        { "id": "absurd", "fragments": ["A"], "face": "front",
+          "requiresChannels": [], "closesChannels": [], "prerequisites": [],
+          "length": 1e2000000, "disabled": false }
+      ]
+    }`;
+    const parsed = parseProblem(text);
+    expect('errors' in parsed).toBe(true);
+    if (!('errors' in parsed)) return;
+    expect(parsed.errors.some((e) => e.path === 'strips[0].length')).toBe(true);
+  });
+
+  it('fromString 与 fromNumber 的边界行为', () => {
+    expect(toStringExact(fromString('1e999'))).toBe('1' + '0'.repeat(999));
+    expect(toStringExact(fromString('-0'))).toBe('0');
+    expect(compareDecimals(fromString('1.00000000000000001'), fromString('1.00000000000000002')))
+      .toBeLessThan(0);
+    expect(() => fromString('1e2000000')).toThrow();
+    expect(() => fromString('abc')).toThrow();
+    expect(toNumber(fromString('0.3'))).toBe(0.3);
   });
 });

@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { SolveResult } from './types';
 import { parseProblem } from './validate';
+import { parseJson, stringifyJson } from './json';
 import { solve } from './solver';
 import { SAMPLE_REORDER, SAMPLE_UNSOLVABLE, sampleText } from './sample';
 import { SolutionView } from './components/SolutionView';
@@ -39,8 +40,9 @@ export default function App() {
 
   const handleFormat = () => {
     try {
-      // 与任何编辑一致：内容变化必须使旧结果失效
-      handleTextChange(JSON.stringify(JSON.parse(text), null, 2));
+      // 与任何编辑一致：内容变化必须使旧结果失效；
+      // 用保留字面量的解析/序列化，避免 JSON.parse 舍入数值精度
+      handleTextChange(stringifyJson(parseJson(text)));
     } catch {
       // 无法解析时不改动文本，错误列表已提示
     }

@@ -3,6 +3,8 @@
  * 所有标识均为唯一非空字符串；通道只需被条带引用即存在，初始全部开放。
  */
 
+import type { Decimal } from './decimal';
+
 export interface Strip {
   /** 条带编号，全局唯一非空 */
   id: string;
@@ -16,8 +18,8 @@ export interface Strip {
   closesChannels: string[];
   /** 叠压前置：所列条带必须先于本条带施工 */
   prerequisites: string[];
-  /** 非负长度 */
-  length: number;
+  /** 非负有限长度，精确十进制（保留输入字面量的全部精度） */
+  length: Decimal;
   /** 禁用状态：禁用条带任何时刻都不可施工 */
   disabled: boolean;
 }
@@ -59,7 +61,8 @@ export interface DeadEnd {
 export interface SolutionStep {
   stripId: string;
   face: string;
-  length: number;
+  /** 精确十进制字符串，供展示 */
+  length: string;
   closesChannels: string[];
   /** 本步新锚定的碎片 */
   newlyAnchored: string[];
@@ -70,7 +73,8 @@ export type SolveResult =
       ok: true;
       sequence: string[];
       stripCount: number;
-      totalLength: number;
+      /** 精确十进制字符串：总和可能超出 double 表示范围，不能用 number */
+      totalLength: string;
       steps: SolutionStep[];
     }
   | {

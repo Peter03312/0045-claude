@@ -8,7 +8,12 @@ import {
   applyStrip,
   type SearchState,
 } from '../src/solver';
-import { compare as compareDecimals, toNumber, type Decimal } from '../src/decimal';
+import {
+  compare as compareDecimals,
+  fromNumber,
+  toStringExact,
+  type Decimal,
+} from '../src/decimal';
 
 /** 确定性伪随机数（mulberry32），保证测试可复现 */
 function rng(seed: number): () => number {
@@ -43,7 +48,7 @@ function randomProblem(rand: () => number, index: number): Problem {
       requiresChannels: pick(channels, 0.5),
       closesChannels: pick(channels, 0.4),
       prerequisites: [], // 先留空，下面统一生成
-      length: lengthPool[Math.floor(rand() * lengthPool.length)],
+      length: fromNumber(lengthPool[Math.floor(rand() * lengthPool.length)]),
       disabled: rand() < 0.15,
     };
   });
@@ -100,7 +105,7 @@ describe('对照朴素枚举的随机化交叉验证', () => {
         expect(actual.ok, `问题 ${i} 应有解`).toBe(true);
         if (actual.ok) {
           expect(actual.sequence, `问题 ${i} 序列`).toEqual(expected.sequence);
-          expect(actual.totalLength, `问题 ${i} 总长度`).toBe(toNumber(expected.totalLength));
+          expect(actual.totalLength, `问题 ${i} 总长度`).toBe(toStringExact(expected.totalLength));
         }
         solvable++;
       }

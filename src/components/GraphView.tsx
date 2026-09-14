@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { Problem } from '../types';
+import { toStringExact } from '../decimal';
 import { layoutGraph, stripById, type PlaybackFrame } from './playback';
 
 interface Props {
@@ -67,7 +68,7 @@ export function GraphView({ problem, frame }: Props) {
               {s.id}
             </text>
             <text x={p.x} y={p.y + 11} textAnchor="middle" className="strip-sub">
-              {s.face} · {s.length}
+              {s.face} · {toStringExact(s.length)}
             </text>
           </g>
         );

@@ -1,3 +1,5 @@
+import { ZERO, compare as compareDecimals, fromNumber, fromString, type Decimal } from './decimal';
+import { parseJson, RawNumber } from './json';
 import type { Problem, Strip, ValidationError } from './types';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -160,8 +162,24 @@ export function validateProblem(input: unknown): { problem: Problem } | { errors
         });
       }
 
-      // length
-      if (typeof raw.length !== 'number' || !Number.isFinite(raw.length) || raw.length < 0) {
+      // length：JSON 数值字面量（RawNumber，逐位保留精度）或程序传入的有限 number
+      let length: Decimal = ZERO;
+      let lengthInvalid = false;
+      const rawLength = raw.length;
+      if (rawLength instanceof RawNumber) {
+        try {
+          length = fromString(rawLength.raw);
+        } catch (e) {
+          err(`${base}.length`, e instanceof Error ? e.message : String(e));
+          lengthInvalid = true;
+        }
+      } else if (typeof rawLength === 'number' && Number.isFinite(rawLength)) {
+        length = fromNumber(rawLength);
+      } else {
+        err(`${base}.length`, '长度必须是非负有限数值');
+        lengthInvalid = true;
+      }
+      if (!lengthInvalid && compareDecimals(length, ZERO) < 0) {
         err(`${base}.length`, '长度必须是非负有限数值');
       }
 
@@ -177,7 +195,7 @@ export function validateProblem(input: unknown): { problem: Problem } | { errors
         requiresChannels,
         closesChannels,
         prerequisites,
-        length: typeof raw.length === 'number' && Number.isFinite(raw.length) && raw.length >= 0 ? raw.length : 0,
+        length,
         disabled: raw.disabled === true,
       });
     });
@@ -198,11 +216,11 @@ export function validateProblem(input: unknown): { problem: Problem } | { errors
   return { problem: { fragments, initialAnchored, strips } };
 }
 
-/** 解析 JSON 文本并校验；解析错误同样定位（行列来自 V8 报错信息） */
+/** 解析 JSON 文本并校验；数值字面量全程保留精度，语法错误带行列定位 */
 export function parseProblem(text: string): { problem: Problem } | { errors: ValidationError[] } {
   let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    raw = parseJson(text);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return { errors: [{ path: '$', message: `JSON 解析失败：${message}` }] };

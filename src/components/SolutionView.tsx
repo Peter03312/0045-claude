@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Problem, SolveResult } from '../types';
+import { toStringExact } from '../decimal';
 import { allChannels, buildFrames, stripById } from './playback';
 import { GraphView } from './GraphView';
 
@@ -77,7 +78,8 @@ export function SolutionView({ problem, result }: Props) {
           <h3>本步状态</h3>
           {justStrip ? (
             <p data-testid="step-action">
-              施工 <strong>{justStrip.id}</strong>（面 {justStrip.face}，长度 {justStrip.length}
+              施工 <strong>{justStrip.id}</strong>（面 {justStrip.face}，长度{' '}
+              {toStringExact(justStrip.length)}
               {justStrip.closesChannels.length > 0
                 ? `，封闭通道 ${justStrip.closesChannels.join('、')}`
                 : ''}

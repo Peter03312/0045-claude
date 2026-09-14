@@ -1,4 +1,4 @@
-import { ZERO, add, compare as compareDecimals, fromNumber, toNumber, type Decimal } from './decimal';
+import { ZERO, add, compare as compareDecimals, toStringExact, type Decimal } from './decimal';
 import type { DeadEnd, Problem, SolveResult, SolutionStep, Strip, Violation } from './types';
 
 /** 按 Unicode 码点（而非 UTF-16 码元）比较两个字符串 */
@@ -84,7 +84,7 @@ export function applyStrip(state: SearchState, strip: Strip): SearchState {
     closedChannels,
     applied: [...state.applied, strip.id],
     appliedSet,
-    totalLength: add(state.totalLength, fromNumber(strip.length)),
+    totalLength: add(state.totalLength, strip.length),
   };
 }
 
@@ -159,7 +159,7 @@ export function solve(problem: Problem): SolveResult {
 
     for (const strip of ordered) {
       const nextCount = state.applied.length + 1;
-      const nextLength = add(state.totalLength, fromNumber(strip.length));
+      const nextLength = add(state.totalLength, strip.length);
       if (best) {
         const b = best;
         if (nextCount > b.sequence.length) continue;
@@ -195,7 +195,7 @@ export function solve(problem: Problem): SolveResult {
       steps.push({
         stripId: id,
         face: strip.face,
-        length: strip.length,
+        length: toStringExact(strip.length),
         closesChannels: [...strip.closesChannels],
         newlyAnchored,
       });
@@ -205,7 +205,7 @@ export function solve(problem: Problem): SolveResult {
       ok: true,
       sequence: b.sequence,
       stripCount: b.sequence.length,
-      totalLength: toNumber(b.totalLength),
+      totalLength: toStringExact(b.totalLength),
       steps,
     };
   }

@@ -112,6 +112,53 @@ test.describe('修补次序台', () => {
     await expect(page.getByTestId('solve-button')).toBeDisabled();
   });
 
+  test('接近的小数长度不丢精度，超大总长度不显示无穷大', async ({ page }) => {
+    await page.goto('/');
+    // 两个长度相差 1e-17：double 无法区分，字面量保留后 b-short 实际更短
+    const close = `{
+      "fragments": ["A", "B"],
+      "initialAnchored": ["A"],
+      "strips": [
+        { "id": "a-long", "fragments": ["A", "B"], "face": "front",
+          "requiresChannels": [], "closesChannels": [], "prerequisites": [],
+          "length": 1.00000000000000002, "disabled": false },
+        { "id": "b-short", "fragments": ["A", "B"], "face": "front",
+          "requiresChannels": [], "closesChannels": [], "prerequisites": [],
+          "length": 1.00000000000000001, "disabled": false }
+      ]
+    }`;
+    await page.getByTestId('editor').fill(close);
+    await page.getByTestId('solve-button').click();
+    await expect(page.getByTestId('solution-sequence')).toHaveText('b-short');
+    await expect(page.getByTestId('solution-summary')).toContainText(
+      '总长度 1.00000000000000001',
+    );
+
+    // 格式化往返不丢字面量精度
+    await page.getByRole('button', { name: '格式化' }).click();
+    await expect(page.getByTestId('editor')).toHaveValue(/1\.00000000000000001/);
+
+    // 两条 1e308：总和 2e308 超出 double 上限，应显示精确值而非 Infinity
+    const huge = `{
+      "fragments": ["A", "B", "C"],
+      "initialAnchored": ["A"],
+      "strips": [
+        { "id": "h1", "fragments": ["A", "B"], "face": "front",
+          "requiresChannels": [], "closesChannels": [], "prerequisites": [],
+          "length": 1e308, "disabled": false },
+        { "id": "h2", "fragments": ["B", "C"], "face": "front",
+          "requiresChannels": [], "closesChannels": [], "prerequisites": [],
+          "length": 1e308, "disabled": false }
+      ]
+    }`;
+    await page.getByTestId('editor').fill(huge);
+    await page.getByTestId('solve-button').click();
+    await expect(page.getByTestId('solution-summary')).toContainText(
+      `总长度 2${'0'.repeat(308)}`,
+    );
+    await expect(page.getByTestId('solution-summary')).not.toContainText('Infinity');
+  });
+
   test('无解样例展示最早阻断与约束解释，不返回部分方案', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: '载入样例：无解' }).click();
